@@ -1,0 +1,9 @@
+torch
+torchvision
+Pillow
+numpy
+matplotlib
+opencv-python
+mlflow
+psycopg2-binary
+python-dotenv
