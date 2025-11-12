@@ -1,4 +1,4 @@
-# 🌟 vizCNN — Stagewise Grad-CAM + Augmentation Visualizer 🌟
+# vizCNN — Stagewise Grad-CAM + Augmentation Visualizer
 
 vizCNN is a compact, modular pipeline for exploring how convolutional neural networks (CNNs) attend to input images across intermediate stages. It:
 
