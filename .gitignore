@@ -205,3 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# MLflow that stores experiment runs in the default directory
+mlruns/
+temp_aug/
+temp_heatmaps/
+temp_mlflow/
+temp_overlays/
