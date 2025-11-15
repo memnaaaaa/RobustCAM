@@ -91,3 +91,40 @@ class GradCAMService:
 
         print(f"✅ Generated {len(heatmaps)} stagewise Grad-CAM maps.")
         return heatmaps, overlays
+    
+    def compute_raw_heatmap(self, activation: torch.Tensor, gradient: torch.Tensor):
+        """
+        Return a normalized float32 heatmap in [0,1] (resized later to orig image shape).
+        Activation & gradient are per-hook tensors.
+        """
+        with torch.no_grad():
+            grad = gradient.mean(dim=(2, 3), keepdim=True)         # [1, C, 1, 1]
+            cam = (grad * activation).sum(dim=1, keepdim=True)     # [1, 1, H, W]
+            cam = torch.relu(cam)
+            cam = cam.squeeze().cpu().numpy().astype(np.float32)
+
+            # normalize to [0,1]
+            cam_min = cam.min()
+            cam = cam - cam_min
+            cam_max = cam.max() + 1e-8
+            cam = cam / cam_max
+        return cam  # float32 in [0,1]
+
+    def generate_stagewise_raw(self, orig_img, activations, gradients):
+        """
+        Like generate_stagewise_outputs but returns raw float heatmaps (not uint8)
+        and overlays if needed separately.
+        """
+        raw_heatmaps = {}
+        overlays = {}
+        for layer_name, act in activations.items():
+            grad = gradients.get(layer_name)
+            if act is None or grad is None:
+                continue
+            heatmap = self.compute_raw_heatmap(act, grad)
+            # keep heatmap as float32 in [0,1]
+            raw_heatmaps[layer_name] = heatmap
+            # you can still produce overlay for visualization if desired:
+            overlay = self._overlay(orig_img, cv2.resize(heatmap, (orig_img.shape[1], orig_img.shape[0])))
+            overlays[layer_name] = overlay
+        return raw_heatmaps, overlays
