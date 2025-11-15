@@ -72,7 +72,7 @@ class MLflowService:
 
         if params:
             mlflow.log_params(params)
-        print(f"🧭 Started MLflow run: {run_name} (backend: {self.backend})")
+        print(f"\n🧭 Started MLflow run: {run_name} (backend: {self.backend})")
 
     def end_run(self):
         """
@@ -157,3 +157,27 @@ class MLflowService:
             os.remove(temp_path)
 
         print(f"📦 Logged augmentation '{augment_name}' results to MLflow.")
+
+    # -------------------------------------------------------------------------
+    # Robust Grad-CAM logging
+    # -------------------------------------------------------------------------
+
+    def log_fused_results(self, fused_heatmaps: dict, uncertainty_maps: dict, metrics: dict):
+        """
+        fused_heatmaps: dict[layer] = uint8 heatmap
+        uncertainty_maps: dict[layer] = uint8 map
+        metrics: dict[layer] = dict of scalars
+        """
+        self.log_stagewise_heatmaps(fused_heatmaps)
+        # save uncertainties
+        os.makedirs("temp_uncert", exist_ok=True)
+        for layer, um in uncertainty_maps.items():
+            temp_path = os.path.join("temp_uncert", f"uncert_{layer}.png")
+            self._save_temp_image(um, temp_path)
+            mlflow.log_artifact(temp_path, artifact_path=f"uncertainty/{layer}")
+            os.remove(temp_path)
+        # log metrics
+        for layer, m in metrics.items():
+            for k, v in m.items():
+                mlflow.log_metric(f"{layer}_{k}", float(v))
+        print("📦 Logged fused & uncertainty results.")
