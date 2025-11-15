@@ -16,7 +16,7 @@ This README is intentionally concise and focused on reproducing experiments on W
 1. Clone the repo and enter the project directory:
 
 ```cmd
-git clone https://github.com/memnaaaaa/RobustCAM.git
+git clone https://github.com/memnaaaaa/RobustCAM
 cd "C:\path\to\RobustCAM"
 ```
 

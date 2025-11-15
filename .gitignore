@@ -212,3 +212,9 @@ temp_aug/
 temp_heatmaps/
 temp_overlays/
 temp_uncert/
+
+# Personal scripts for batch inference
+batch_run.py
+report_generator.py
+robust_metrics.py
+test_mlflow_connection.py
