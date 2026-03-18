@@ -1,10 +1,10 @@
 # src/model_service.py
-# Loads VGG16, sets up hooks, and runs forward/backward passes for Grad-CAM.
+# Loads CNN models (VGG16, ResNet50, etc.), sets up hooks, and runs forward/backward passes for Grad-CAM.
 
 # Import necessary libraries
 import torch # for tensor operations
 import torch.nn as nn # for neural network modules
-from torchvision import models # for VGG16 model
+from torchvision import models # for model loading
 
 # HookManager class definition
 class HookManager:
@@ -65,25 +65,90 @@ class HookManager:
             bh = layer.register_full_backward_hook(self._backward_hook(layer_name))
 
             self._handles.extend([fh, bh])
-            print(f"✅ Hooked: {layer_name} ({idx})")
+            print(f"Hooked: {layer_name} ({idx})")
+
+    def register_by_name(self, model: nn.Module, layer_names: list[str]):
+        """
+        Architecture-agnostic hook registration via model.named_modules().
+        Raises ValueError with available names if a layer name is not found.
+        """
+        self.clear()
+        available = {name for name, _ in model.named_modules() if name}
+        for name in layer_names:
+            if name not in available:
+                raise ValueError(
+                    f"Layer '{name}' not found in model. "
+                    f"Available top-level names (sample): {sorted(available)[:30]}"
+                )
+            for mod_name, module in model.named_modules():
+                if mod_name == name:
+                    fh = module.register_forward_hook(self._forward_hook(name))
+                    bh = module.register_full_backward_hook(self._backward_hook(name))
+                    self._handles.extend([fh, bh])
+                    print(f"Hooked: {name} ({module.__class__.__name__})")
+                    break
 
 # ModelService class definition
 class ModelService:
     """
-    Loads VGG16, registers hooks, and provides forward/backward methods.
+    Loads a CNN model (VGG16, ResNet50, etc.), registers hooks, and provides
+    forward/backward methods for Grad-CAM computation.
+
+    Args:
+        arch: Architecture name. "vgg16" (default) or "resnet50".
+        checkpoint_path: Optional path to a fine-tuned checkpoint dict containing
+            {"model_state_dict": ..., "num_classes": int, ...}.
+        device: torch device string. Defaults to "cuda" if available else "cpu".
     """
-    def __init__(self, device=None):
+    def __init__(self, arch: str = "vgg16", checkpoint_path: str = None, device=None):
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        # use the new weights enum API; falls back if older torchvision installed
-        try:
-            self.model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1).to(self.device)
-        except Exception:
-            # fallback for older torchvision
-            self.model = models.vgg16(pretrained=True).to(self.device)
-        
+        self.arch = arch
+
+        # ── build base model ──────────────────────────────────────────────────
+        if arch == "vgg16":
+            try:
+                self.model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
+            except Exception:
+                self.model = models.vgg16(pretrained=True)
+        elif arch == "resnet50":
+            self.model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+        elif arch == "resnet101":
+            self.model = models.resnet101(weights=models.ResNet101_Weights.IMAGENET1K_V1)
+        elif arch == "densenet161":
+            self.model = models.densenet161(weights=models.DenseNet161_Weights.IMAGENET1K_V1)
+        elif arch == "efficientnet_b0":
+            self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
+        elif arch == "vit_b_16":
+            print("[Warning] ViT produces degraded Grad-CAM heatmaps by design (Panboonyuen 2026).")
+            self.model = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
+        else:
+            print(f"[Warning] Unsupported arch '{arch}'. Attempting to load as vgg16.")
+            self.model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
+
+        # ── load checkpoint (replaces fc head + weights) ──────────────────────
+        if checkpoint_path is not None:
+            ckpt = torch.load(checkpoint_path, map_location=self.device)
+            num_classes = ckpt.get('num_classes', 3)
+            # rebuild classification head to match checkpoint's num_classes
+            if arch == "resnet50":
+                self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+            elif arch == "resnet101":
+                self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+            elif arch == "densenet161":
+                self.model.classifier = nn.Linear(self.model.classifier.in_features, num_classes)
+            elif arch == "efficientnet_b0":
+                in_feat = self.model.classifier[1].in_features
+                self.model.classifier[1] = nn.Linear(in_feat, num_classes)
+            self.model.load_state_dict(ckpt['model_state_dict'])
+            val_acc = ckpt.get('val_acc', float('nan'))
+            epoch = ckpt.get('epoch', '?')
+            print(f"Loaded checkpoint '{checkpoint_path}': epoch={epoch}, val_acc={val_acc:.4f}")
+
+        self.model = self.model.to(self.device)
+
         # Disable inplace ReLU to avoid issues during backward
         self._disable_inplace_relu(self.model)
-        
+
         self.model.eval()
         self.hook_manager = HookManager()
         self.output = None  # will hold last forward output
@@ -104,9 +169,18 @@ class ModelService:
     # Register hooks method
     def register_hooks(self, layer_indices: list[int]):
         """
-        Registers hooks on the model using the HookManager.
+        Registers hooks on the model using integer indices into model.features[].
+        Use this for VGG16. For ResNet/DenseNet/etc, use register_hooks_by_name().
         """
         self.hook_manager.register(self.model, layer_indices)
+
+    def register_hooks_by_name(self, layer_names: list[str]):
+        """
+        Architecture-agnostic hook registration by module name.
+        Use for ResNet, DenseNet, EfficientNet, ViT. Use register_hooks() for VGG16.
+        Example: ms.register_hooks_by_name(['layer3', 'layer4'])
+        """
+        self.hook_manager.register_by_name(self.model, layer_names)
 
     def forward(self, input_tensor):
         """
