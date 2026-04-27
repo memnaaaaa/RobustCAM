@@ -36,9 +36,6 @@ conda activate robustcam && pip install lime
 conda activate robustcam && pip install shap
 ```
 
-All commands must use the `robustcam` conda environment. On this machine, invoke Python
-directly with `D:/miniconda3/envs/robustcam/python.exe` if `conda run` is unavailable.
-
 ## Phase progress
 
 | Phase | Status | Description |
@@ -48,14 +45,13 @@ directly with `D:/miniconda3/envs/robustcam/python.exe` if `conda run` is unavai
 | Phase 2 | ✓ Complete | 9-metric faithfulness suite (`faithfulness_metrics.py`) |
 | Phase 3 | ✓ Complete | LIME integration (`lime_service.py`) |
 | Phase 4 | In progress | SHAP integration + cross-method voting mask |
-| Phase 5 | Pending | Batch evaluation pipeline + results/ export |
+| Phase 5 | In progress | Batch evaluation pipeline + results/ export |
 | Phase 6 | Pending | Multi-arch support + augmentation extensions |
 
 ## Run training (Phase 0)
 
 ```cmd
 conda activate robustcam
-cd D:\RobustCAM
 python src/train.py --data-root data --epochs 25 --batch-size 32
 ```
 
