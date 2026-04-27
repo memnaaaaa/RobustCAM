@@ -1,6 +1,0 @@
-Architecture,Best Epoch,Val Accuracy,Val Loss,Hook Layers,XAI Methods Applied
-ResNet-50,18,0.8813,0.5746,"layer3, layer4",Grad-CAM + LIME + SHAP
-ResNet-101,16,0.9269,0.4953,"layer3, layer4",Grad-CAM + LIME + SHAP
-DenseNet-161,12,0.9041,0.4871,"features.denseblock3, features.denseblock4",Grad-CAM only
-EfficientNet-B0,23,0.9178,0.3172,"features.6, features.7, features.8",Grad-CAM + LIME + SHAP
-ViT-B/16,22,0.8995,0.4175,encoder.layers.encoder_layer_10/11,Grad-CAM only
