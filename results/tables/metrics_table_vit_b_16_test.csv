@@ -1,0 +1,7 @@
+Method,faith,loc_acc,consist_iou,fidelity,stability,consist_pearson,mean_variance,mean_iou_topk,mean_spearman
+Grad-CAM,0.333923,,1.0,0.486364,,,,,
+Robust-CAM (mean),0.333923,,1.0,0.486364,,,0.0,1.0,0.0
+Robust-CAM (median),0.333923,,1.0,0.486364,,,0.0,1.0,0.0
+LIME,,,,,,,,,
+SHAP,,,,,,,,,
+Voting mask,,,,,,,,,

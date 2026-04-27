@@ -1,0 +1,6 @@
+class,precision,recall,f1-score,support
+Normal,0.8889,0.8533,0.8707,75
+Benign,0.6071,0.7083,0.6538,24
+Malignant,0.9917,0.9835,0.9876,121
+macro avg,0.8292,0.8484,0.8374,220
+weighted avg,0.9147,0.9091,0.9113,220
