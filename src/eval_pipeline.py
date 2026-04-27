@@ -40,6 +40,16 @@ from xai_fusion import compute_voting_mask, voting_mask_to_colormap
 from iq_othncc_dataset import IQOTHNCCDDataset
 from mlflow_service import MLflowService
 
+_ARCH_DEFAULT_LAYERS: dict[str, list[str]] = {
+    "resnet50":        ["layer3", "layer4"],
+    "resnet101":       ["layer3", "layer4"],
+    "densenet161":     ["features.denseblock3", "features.denseblock4"],
+    "efficientnet_b0": ["features.6", "features.7", "features.8"],
+    "vit_b_16":        ["encoder.layers.encoder_layer_10",
+                        "encoder.layers.encoder_layer_11"],
+    "vgg16":           ["features.14", "features.20", "features.30"],
+}
+
 
 # ─── small helpers ─────────────────────────────────────────────────────────────
 
@@ -139,17 +149,20 @@ def _save_panel(
 def _save_bar_charts(
     agg: dict[str, dict[str, float]],
     results_dir: str,
+    arch_tag: str = "",
 ) -> None:
     """
     Save quantitative bar chart PNGs to results/figures/quantitative/.
     agg: { method_name: { metric_key: mean_value, ... }, ... }
+    arch_tag: appended to each filename, e.g. "resnet50" → metric_comparison_faith_resnet50.png
     """
     quant_dir = os.path.join(results_dir, "figures", "quantitative")
     os.makedirs(quant_dir, exist_ok=True)
 
+    suffix = f"_{arch_tag}" if arch_tag else ""
     methods = list(agg.keys())
 
-    def _bar(metric_keys: list[str], filename: str, ylabel: str, title: str) -> None:
+    def _bar(metric_keys: list[str], base: str, ylabel: str, title: str) -> None:
         fig, axes = plt.subplots(1, len(metric_keys), figsize=(5 * len(metric_keys), 4),
                                  squeeze=False)
         for col_idx, metric in enumerate(metric_keys):
@@ -166,18 +179,18 @@ def _save_bar_charts(
                 if not np.isnan(v):
                     ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                             f"{v:.3f}", ha="center", va="bottom", fontsize=7)
-        fig.suptitle(title, fontsize=11)
+        fig.suptitle(f"{title} [{arch_tag}]" if arch_tag else title, fontsize=11)
         plt.tight_layout()
-        fig.savefig(os.path.join(quant_dir, filename), dpi=120, bbox_inches="tight")
+        fig.savefig(os.path.join(quant_dir, f"{base}{suffix}.png"), dpi=120, bbox_inches="tight")
         plt.close(fig)
 
-    _bar(["faith"], "metric_comparison_faith.png", "score", "Perturbation Faithfulness (↑)")
-    _bar(["fidelity"], "metric_comparison_fidelity.png", "score", "XAI Fidelity (↑)")
-    _bar(["stability"], "metric_comparison_stability.png", "score", "XAI Stability (↑)")
-    _bar(["consist_iou", "consist_pearson"], "metric_comparison_consistency.png", "score",
+    _bar(["faith"],    "metric_comparison_faith",    "score", "Perturbation Faithfulness (↑)")
+    _bar(["fidelity"], "metric_comparison_fidelity", "score", "XAI Fidelity (↑)")
+    _bar(["stability"], "metric_comparison_stability", "score", "XAI Stability (↑)")
+    _bar(["consist_iou", "consist_pearson"], "metric_comparison_consistency", "score",
          "Explanation Consistency (↑)")
     _bar(["mean_variance", "mean_iou_topk", "mean_spearman"],
-         "robustcam_stability_metrics.png", "score", "Robust-CAM Augmentation Stability")
+         "robustcam_stability_metrics", "score", "Robust-CAM Augmentation Stability")
 
 
 # ─── main pipeline ─────────────────────────────────────────────────────────────
@@ -198,6 +211,7 @@ def run_eval_pipeline(
     results_dir: str = "results",
     experiment_name: str = "RobustCAM_ResNet50_IQ_OTH_NCCD",
     run_name: str = None,
+    skip_panels: bool = False,
 ) -> None:
     """
     Batch evaluation pipeline. Runs Grad-CAM, Robust-CAM, LIME, SHAP, and voting mask,
@@ -211,7 +225,7 @@ def run_eval_pipeline(
     All metrics logged to MLflow.
     """
     if layers is None:
-        layers = ["layer3", "layer4"]
+        layers = _ARCH_DEFAULT_LAYERS.get(arch, ["layer3", "layer4"])
 
     # ── ensure output dirs exist ───────────────────────────────────────────────
     qual_dir   = os.path.join(results_dir, "figures", "qualitative")
@@ -424,18 +438,20 @@ def run_eval_pipeline(
                 _log_metrics_mlflow(mlf, f"{prefix}_{method.lower().replace(' ', '_')}", mdict)
 
             # ── qualitative panel ─────────────────────────────────────────────
-            panel_path = os.path.join(qual_dir, f"{class_name.lower()}_{stem}_xai_panel.png")
-            _save_panel(
-                pil_img, hm_gc, hm_rc_mean, uncertainty,
-                hm_lime, hm_shap, voting_cm,
-                softmax_probs,
-                title=f"{class_name} | pred={pred_class} | conf={softmax_probs[pred_class]:.3f}",
-                save_path=panel_path,
-                gc_svc=gc,
-            )
+            if not skip_panels:
+                panel_path = os.path.join(qual_dir, f"{class_name.lower()}_{stem}_xai_panel.png")
+                _save_panel(
+                    pil_img, hm_gc, hm_rc_mean, uncertainty,
+                    hm_lime, hm_shap, voting_cm,
+                    softmax_probs,
+                    title=f"{class_name} | pred={pred_class} | conf={softmax_probs[pred_class]:.3f}",
+                    save_path=panel_path,
+                    gc_svc=gc,
+                )
+                print(f"  panel saved → {os.path.basename(panel_path)}")
 
             elapsed = time.time() - t0
-            print(f"  panel saved → {os.path.basename(panel_path)} ({elapsed:.1f}s)")
+            print(f"  [{img_idx+1}/{len(all_samples)}] done ({elapsed:.1f}s)")
 
         # ── post-loop: aggregate metrics ──────────────────────────────────────
         print("\n[eval_pipeline] Aggregating metrics...")
@@ -472,7 +488,7 @@ def run_eval_pipeline(
             rows.append(row)
 
         df_metrics = pd.DataFrame(rows, columns=["Method"] + metric_cols)
-        csv_path = os.path.join(tables_dir, f"metrics_table_{split}.csv")
+        csv_path = os.path.join(tables_dir, f"metrics_table_{arch}_{split}.csv")
         df_metrics.to_csv(csv_path, index=False)
         print(f"\nMetrics table written → {csv_path}")
         print(df_metrics.to_string(index=False))
@@ -499,13 +515,13 @@ def run_eval_pipeline(
                         "support":   int(r.get("support", 0)),
                     })
             df_report = pd.DataFrame(report_rows)
-            report_path = os.path.join(tables_dir, "classification_report.csv")
+            report_path = os.path.join(tables_dir, f"classification_report_{arch}.csv")
             df_report.to_csv(report_path, index=False)
             print(f"\nClassification report → {report_path}")
             print(df_report.to_string(index=False))
 
         # ── bar charts ────────────────────────────────────────────────────────
-        _save_bar_charts(agg, results_dir)
+        _save_bar_charts(agg, results_dir, arch_tag=arch)
         print(f"\nBar charts written → {quant_dir}/")
 
     finally:
@@ -534,6 +550,8 @@ if __name__ == "__main__":
     p.add_argument("--shap-background", default=10, type=int, dest="n_shap_background")
     p.add_argument("--no-lime",      action="store_true", dest="no_lime")
     p.add_argument("--no-shap",      action="store_true", dest="no_shap")
+    p.add_argument("--skip-panels",  action="store_true", dest="skip_panels",
+                   help="Skip saving qualitative XAI panel figures (metrics only)")
     p.add_argument("--run-name",     default=None, dest="run_name")
     p.add_argument("--experiment",   default="RobustCAM_ResNet50_IQ_OTH_NCCD",
                    dest="experiment_name")
@@ -555,4 +573,5 @@ if __name__ == "__main__":
         results_dir=args.results_dir,
         experiment_name=args.experiment_name,
         run_name=args.run_name,
+        skip_panels=args.skip_panels,
     )

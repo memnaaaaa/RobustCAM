@@ -287,7 +287,11 @@ def compute_all_metrics(
                 consist_maps, heatmap, threshold_percentile
             )
         elif heatmap_fn is not None:
-            consist_maps = [heatmap_fn(input_tensor) for _ in range(n_consistency_runs)]
+            # Perturb input with noise each run so maps differ; same noise_std as stability.
+            consist_maps = []
+            for _ in range(n_consistency_runs):
+                noise = torch.randn_like(input_tensor) * noise_std
+                consist_maps.append(heatmap_fn(input_tensor + noise))
             results["consist_iou"] = explanation_consistency(
                 consist_maps, heatmap, threshold_percentile
             )
@@ -321,7 +325,10 @@ def compute_all_metrics(
             pearson_maps = aug_heatmaps
             results["consist_pearson"] = xai_consistency_pearson(pearson_maps)
         elif heatmap_fn is not None:
-            pearson_maps = [heatmap_fn(input_tensor) for _ in range(n_consistency_runs)]
+            pearson_maps = []
+            for _ in range(n_consistency_runs):
+                noise = torch.randn_like(input_tensor) * noise_std
+                pearson_maps.append(heatmap_fn(input_tensor + noise))
             results["consist_pearson"] = xai_consistency_pearson(pearson_maps)
         else:
             results["consist_pearson"] = np.nan
