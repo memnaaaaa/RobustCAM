@@ -86,10 +86,30 @@ class MLflowService:
     # -------------------------------------------------------------------------
 
     def log_scalar(self, key, value):
-        """
-        Log a scalar metric.
-        """
+        """Log a scalar metric."""
         mlflow.log_metric(key, value)
+
+    def log_metrics_dict(self, metrics: dict, prefix: str = "") -> None:
+        """
+        Log a flat dict of metrics to MLflow, skipping NaN values.
+        Keys are optionally prefixed with <prefix>_.
+        """
+        import math
+        clean = {}
+        for k, v in metrics.items():
+            if v is None:
+                continue
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                continue
+            if math.isnan(fv):
+                continue
+            key = f"{prefix}_{k}" if prefix else k
+            key = key.replace(" ", "_").replace("(", "").replace(")", "")
+            clean[key] = fv
+        if clean:
+            mlflow.log_metrics(clean)
 
     def _save_temp_image(self, image: np.ndarray, path: str):
         """
@@ -181,3 +201,32 @@ class MLflowService:
             for k, v in m.items():
                 mlflow.log_metric(f"{layer}_{k}", float(v))
         print("📦 Logged fused & uncertainty results.")
+
+    def log_voting_mask_artifacts(
+        self,
+        voting_mask: np.ndarray,
+        colormap: np.ndarray,
+        image_stem: str,
+    ):
+        """
+        Logs the voting mask (grayscale, scaled 0-85 per vote count) and its RGB
+        colormap under MLflow artifact path images/<image_stem>/.
+        voting_mask: int32 [H, W] in {0,1,2,3}
+        colormap:    uint8  [H, W, 3] RGB
+        image_stem:  base filename without extension (used as subfolder)
+        """
+        os.makedirs("temp_voting", exist_ok=True)
+        artifact_path = f"images/{image_stem}"
+
+        gray_path = os.path.join("temp_voting", f"{image_stem}_voting_gray.png")
+        gray = (voting_mask.astype(np.float32) / 3.0 * 255).astype(np.uint8)
+        cv2.imwrite(gray_path, gray)
+        mlflow.log_artifact(gray_path, artifact_path=artifact_path)
+        os.remove(gray_path)
+
+        color_path = os.path.join("temp_voting", f"{image_stem}_voting_color.png")
+        cv2.imwrite(color_path, cv2.cvtColor(colormap, cv2.COLOR_RGB2BGR))
+        mlflow.log_artifact(color_path, artifact_path=artifact_path)
+        os.remove(color_path)
+
+        print(f"📦 Logged voting mask artifacts for '{image_stem}'.")

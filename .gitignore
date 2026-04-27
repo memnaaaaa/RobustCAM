@@ -34,3 +34,6 @@ data/*.txt
 # Private report folder — not committed
 report/
 /src/__pycache__
+
+# Environment variables
+.env

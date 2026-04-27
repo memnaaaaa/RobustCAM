@@ -7,6 +7,8 @@ import torch
 from torchvision import transforms
 from PIL import Image
 
+from data_service import IMAGENET_MEAN, IMAGENET_STD
+
 
 class LIMEService:
     """
@@ -95,10 +97,7 @@ class LIMEService:
         preprocess = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225],
-            ),
+            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ])
         device = model_service.device
         model = model_service.model

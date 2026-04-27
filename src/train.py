@@ -15,13 +15,16 @@ from torchvision import models, transforms
 from PIL import Image
 import matplotlib.pyplot as plt
 
+import mlflow
+from data_service import IMAGENET_MEAN, IMAGENET_STD
+from iq_othncc_dataset import IQOTHNCCDDataset
+from mlflow_service import MLflowService
+
 # ── constants ─────────────────────────────────────────────────────────────────
 
-CLASS_DIRS  = {0: "Normal cases", 1: "Bengin cases", 2: "Malignant cases"}
 CLASS_NAMES = {0: "Normal", 1: "Benign", 2: "Malignant"}
 
-IMAGENET_MEAN = [0.485, 0.456, 0.406]
-IMAGENET_STD  = [0.229, 0.224, 0.225]
+SUPPORTED_ARCHS = ["resnet50", "resnet101", "densenet161", "efficientnet_b0", "vit_b_16"]
 
 # ── dataset ───────────────────────────────────────────────────────────────────
 
@@ -70,52 +73,78 @@ def split_dataset(
     seed: int = 42,
 ) -> tuple[list, list, list]:
     """
-    Discovers all images, shuffles deterministically, splits into
-    train/val/test lists of (image_path, label) tuples.
-    Returns: (train_samples, val_samples, test_samples)
+    Delegates to IQOTHNCCDDataset for deterministic splitting.
+    Returns (train_samples, val_samples, test_samples) as (path, label) tuples.
     """
-    all_samples = []
-    for label, dir_name in CLASS_DIRS.items():
-        class_dir = os.path.join(data_root, dir_name)
-        if not os.path.isdir(class_dir):
-            raise FileNotFoundError(f"Class directory not found: {class_dir}")
-        files = sorted([
-            f for f in os.listdir(class_dir)
-            if f.lower().endswith((".jpg", ".jpeg", ".png"))
-        ])
-        for f in files:
-            all_samples.append((os.path.join(class_dir, f), label))
-
-    rng = random.Random(seed)
-    rng.shuffle(all_samples)
-
-    n = len(all_samples)
-    n_train = int(n * train_ratio)
-    n_val   = int(n * val_ratio)
-
-    train_samples = all_samples[:n_train]
-    val_samples   = all_samples[n_train:n_train + n_val]
-    test_samples  = all_samples[n_train + n_val:]
-
+    ds = IQOTHNCCDDataset(data_root, split="all",
+                          train_ratio=train_ratio, val_ratio=val_ratio, seed=seed)
+    train_samples = [(p, l) for p, l, _ in ds.get_split_samples("train")]
+    val_samples   = [(p, l) for p, l, _ in ds.get_split_samples("val")]
+    test_samples  = [(p, l) for p, l, _ in ds.get_split_samples("test")]
     print(f"Dataset split — train: {len(train_samples)}, val: {len(val_samples)}, test: {len(test_samples)}")
     return train_samples, val_samples, test_samples
 
 
 # ── model ─────────────────────────────────────────────────────────────────────
 
-def build_resnet50(num_classes: int = 3, freeze_backbone: bool = True) -> nn.Module:
+def build_model(
+    arch: str,
+    num_classes: int = 3,
+    freeze_backbone: bool = True,
+) -> tuple[nn.Module, list, list]:
     """
-    Loads ImageNet-pretrained ResNet50.
-    Replaces the fc head with a num_classes linear layer.
-    If freeze_backbone=True, freezes all layers except the new fc head.
-    Returns the modified model.
+    Loads ImageNet-pretrained weights for the given architecture, replaces the
+    classification head to match num_classes, and optionally freezes backbone params.
+
+    Returns:
+        (model, head_params, backbone_params)
+        head_params     — parameter list for the new classification head (always trained)
+        backbone_params — parameter list for everything else (frozen when freeze_backbone=True)
     """
-    model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+    if arch not in SUPPORTED_ARCHS:
+        raise ValueError(f"arch '{arch}' not supported. Choose from {SUPPORTED_ARCHS}")
+
+    if arch == "resnet50":
+        model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
+        head_params     = list(model.fc.parameters())
+        backbone_params = [p for n, p in model.named_parameters() if "fc" not in n]
+
+    elif arch == "resnet101":
+        model = models.resnet101(weights=models.ResNet101_Weights.IMAGENET1K_V1)
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
+        head_params     = list(model.fc.parameters())
+        backbone_params = [p for n, p in model.named_parameters() if "fc" not in n]
+
+    elif arch == "densenet161":
+        model = models.densenet161(weights=models.DenseNet161_Weights.IMAGENET1K_V1)
+        model.classifier = nn.Linear(model.classifier.in_features, num_classes)
+        head_params     = list(model.classifier.parameters())
+        backbone_params = [p for n, p in model.named_parameters() if "classifier" not in n]
+
+    elif arch == "efficientnet_b0":
+        model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
+        in_feat = model.classifier[1].in_features
+        model.classifier[1] = nn.Linear(in_feat, num_classes)
+        head_params     = list(model.classifier.parameters())
+        backbone_params = [p for n, p in model.named_parameters() if "classifier" not in n]
+
+    elif arch == "vit_b_16":
+        model = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
+        model.heads.head = nn.Linear(model.heads.head.in_features, num_classes)
+        head_params     = list(model.heads.parameters())
+        backbone_params = [p for n, p in model.named_parameters() if "heads" not in n]
+
     if freeze_backbone:
-        for param in model.parameters():
-            param.requires_grad = False
-    # replace head — in_features is 2048 for ResNet50
-    model.fc = nn.Linear(model.fc.in_features, num_classes)
+        for p in backbone_params:
+            p.requires_grad = False
+
+    return model, head_params, backbone_params
+
+
+def build_resnet50(num_classes: int = 3, freeze_backbone: bool = True) -> nn.Module:
+    """Legacy wrapper — use build_model('resnet50', ...) for new code."""
+    model, _, _ = build_model("resnet50", num_classes=num_classes, freeze_backbone=freeze_backbone)
     return model
 
 
@@ -186,6 +215,7 @@ def save_training_curves(
 
 def train(
     data_root: str = "data",
+    arch: str = "resnet50",
     epochs: int = 25,
     batch_size: int = 32,
     lr: float = 1e-3,
@@ -193,12 +223,12 @@ def train(
     checkpoint_dir: str = "checkpoints",
     results_dir: str = "results",
     seed: int = 42,
-    experiment_name: str = "ResNet50_IQ_OTH_NCCD_Finetune",
+    experiment_name: str = None,
 ):
     """
-    Full training loop. Logs train/val loss and accuracy to MLflow each epoch.
-    Saves best checkpoint to checkpoints/resnet50_iqothnc.pth.
-    Saves training curves to results/figures/training/training_curves_resnet50.png.
+    Full training loop for any supported architecture on IQ-OTH/NCCD.
+    Saves best checkpoint to checkpoints/<arch>_iqothnc.pth.
+    Saves training curves to results/figures/training/training_curves_<arch>.png.
 
     The saved checkpoint dict contains:
         {
@@ -207,10 +237,16 @@ def train(
             "val_acc": float,
             "val_loss": float,
             "class_names": {0: "Normal", 1: "Benign", 2: "Malignant"},
-            "arch": "resnet50",
+            "arch": str,
             "num_classes": 3,
         }
     """
+    if arch not in SUPPORTED_ARCHS:
+        raise ValueError(f"arch '{arch}' not supported. Choose from {SUPPORTED_ARCHS}")
+
+    if experiment_name is None:
+        experiment_name = f"{arch}_IQ_OTH_NCCD_Finetune"
+
     # reproducibility
     random.seed(seed)
     np.random.seed(seed)
@@ -219,7 +255,7 @@ def train(
         torch.cuda.manual_seed_all(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    print(f"Using device: {device}  |  arch: {arch}")
 
     # directories
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -235,37 +271,40 @@ def train(
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,  num_workers=0)
     val_loader   = DataLoader(val_dataset,   batch_size=batch_size, shuffle=False, num_workers=0)
 
-    # model
-    model = build_resnet50(num_classes=3, freeze_backbone=freeze_backbone)
+    # model — build_model returns (model, head_params, backbone_params)
+    model, head_params, backbone_params = build_model(
+        arch, num_classes=3, freeze_backbone=freeze_backbone
+    )
     model = model.to(device)
 
-    # optimizer — only train fc if backbone is frozen
+    # optimizer — head-only when frozen; differential LR when fully unfrozen
     if freeze_backbone:
-        optimizer = torch.optim.Adam(model.fc.parameters(), lr=lr)
+        optimizer = torch.optim.Adam(head_params, lr=lr)
     else:
         optimizer = torch.optim.Adam([
-            {"params": [p for n, p in model.named_parameters() if "fc" not in n], "lr": lr * 0.1},
-            {"params": model.fc.parameters(), "lr": lr},
+            {"params": backbone_params, "lr": lr * 0.1},
+            {"params": head_params,     "lr": lr},
         ])
 
     # weighted loss
     class_weights = compute_class_weights(train_samples).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
-    # MLflow setup
+    # MLflow setup — delegates load_dotenv() + URI resolution + local fallback to MLflowService
     try:
-        import mlflow
-        mlflow.set_experiment(experiment_name)
-        mlflow_run = mlflow.start_run()
-        mlflow.log_params({
-            "epochs": epochs,
-            "batch_size": batch_size,
-            "lr": lr,
-            "freeze_backbone": freeze_backbone,
-            "seed": seed,
-            "arch": "resnet50",
-            "num_classes": 3,
-        })
+        mlf = MLflowService(experiment_name=experiment_name)
+        mlf.start_run(
+            run_name=f"{arch}_run",
+            params={
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "lr": lr,
+                "freeze_backbone": freeze_backbone,
+                "seed": seed,
+                "arch": arch,
+                "num_classes": 3,
+            },
+        )
         use_mlflow = True
     except Exception as e:
         print(f"[Warning] MLflow not available: {e}")
@@ -274,7 +313,7 @@ def train(
     train_losses, val_losses = [], []
     train_accs,   val_accs   = [], []
     best_val_acc  = 0.0
-    best_ckpt_path = os.path.join(checkpoint_dir, "resnet50_iqothnc.pth")
+    best_ckpt_path = os.path.join(checkpoint_dir, f"{arch}_iqothnc.pth")
 
     try:
         for epoch in range(1, epochs + 1):
@@ -350,7 +389,7 @@ def train(
                     "val_acc":          val_acc,
                     "val_loss":         val_loss,
                     "class_names":      CLASS_NAMES,
-                    "arch":             "resnet50",
+                    "arch":             arch,
                     "num_classes":      3,
                 }
                 torch.save(checkpoint, best_ckpt_path)
@@ -358,13 +397,13 @@ def train(
 
     finally:
         # always save curves
-        curves_path = os.path.join(curves_dir, "training_curves_resnet50.png")
+        curves_path = os.path.join(curves_dir, f"training_curves_{arch}.png")
         save_training_curves(train_losses, val_losses, train_accs, val_accs, curves_path)
 
         if use_mlflow:
             try:
                 mlflow.log_metrics({"best_val_acc": best_val_acc})
-                mlflow.end_run()
+                mlf.end_run()
             except Exception as e:
                 print(f"[Warning] MLflow end_run failed: {e}")
 
@@ -378,7 +417,8 @@ def train(
 if __name__ == "__main__":
     import argparse
 
-    p = argparse.ArgumentParser(description="Fine-tune ResNet50 on IQ-OTH/NCCD")
+    p = argparse.ArgumentParser(description="Fine-tune a CNN on IQ-OTH/NCCD lung CT dataset")
+    p.add_argument("--arch",           default="resnet50", choices=SUPPORTED_ARCHS)
     p.add_argument("--data-root",      default="data")
     p.add_argument("--epochs",         default=25, type=int)
     p.add_argument("--batch-size",     default=32, type=int)
@@ -390,6 +430,7 @@ if __name__ == "__main__":
     args = p.parse_args()
 
     train(
+        arch=args.arch,
         data_root=args.data_root,
         epochs=args.epochs,
         batch_size=args.batch_size,

@@ -42,6 +42,18 @@ def fuse_median(heatmaps: List[np.ndarray]):
     arr = np.stack(heatmaps, axis=0)
     return np.median(arr, axis=0)
 
+def fuse_weighted(heatmaps: List[np.ndarray], weights: List[float]) -> np.ndarray:
+    """
+    Weighted average fusion. weights must sum to 1.0 (enforced by normalization).
+    Returns float32 array same shape as each heatmap.
+    """
+    if len(weights) != len(heatmaps):
+        raise ValueError(f"len(weights)={len(weights)} != len(heatmaps)={len(heatmaps)}")
+    w = np.array(weights, dtype=np.float32)
+    w = w / (w.sum() + 1e-8)
+    arr = np.stack(heatmaps, axis=0)  # [N, H, W]
+    return np.sum(arr * w[:, None, None], axis=0)
+
 def compute_uncertainty(heatmaps: List[np.ndarray]):
     arr = np.stack(heatmaps, axis=0)
     return np.std(arr, axis=0)  # per-pixel std

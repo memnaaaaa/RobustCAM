@@ -1,11 +1,14 @@
 # src/data_service.py
 # Handles image loading, preprocessing, and augmentations.
 
-# Import necessary libraries
-import torch # for tensor operations
-from torchvision import transforms # for image transformations
-from PIL import Image # for image handling
-import random # for random augmentations
+import torch
+from torchvision import transforms
+from PIL import Image
+import random
+
+# Canonical ImageNet normalization constants — import from here to avoid duplication.
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD  = [0.229, 0.224, 0.225]
 
 # DataService class definition
 class DataService:
@@ -20,10 +23,7 @@ class DataService:
         self.preprocess_transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            )
+            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ])
 
         # Basic augmentation pipeline

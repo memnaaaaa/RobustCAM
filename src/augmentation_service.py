@@ -29,6 +29,13 @@ class AugmentationService:
             ]),
             "gaussian_blur": T.Compose([T.GaussianBlur(kernel_size=5), resize]),
             "grayscale": T.Compose([T.RandomGrayscale(p=1.0), resize]),
+            "rotation_neg15": T.Compose([T.RandomRotation(15), resize]),
+            "rotation_10": T.Compose([T.RandomRotation(10), resize]),
+            "center_crop": T.Compose([T.CenterCrop(int(image_size * 0.85)), resize]),
+            "contrast_high": T.Compose([
+                T.ColorJitter(brightness=0.0, contrast=0.8, saturation=0.0),
+                resize
+            ]),
         }
 
     def apply(self, image: Image.Image):
@@ -51,13 +58,22 @@ class AugmentationService:
                 aug_img = transform.transforms[-1](aug_img) if hasattr(transform, "transforms") else transform(aug_img)
                 meta = {"type": "flip", "mode": "horizontal"}
             elif name == "rotation_15":
-                # use a small random angle in [-15, 15] but record it deterministically
-                angle = 15  # you can change to random.choice([-15, -10, 10, 15]) but record it
+                angle = 15
+                aug_img = image.rotate(angle, resample=Image.BILINEAR, expand=False)
+                aug_img = transform.transforms[-1](aug_img) if hasattr(transform, "transforms") else transform(aug_img)
+                meta = {"type": "rotation", "angle": angle}
+            elif name == "rotation_neg15":
+                angle = -15
+                aug_img = image.rotate(angle, resample=Image.BILINEAR, expand=False)
+                aug_img = transform.transforms[-1](aug_img) if hasattr(transform, "transforms") else transform(aug_img)
+                meta = {"type": "rotation", "angle": angle}
+            elif name == "rotation_10":
+                angle = 10
                 aug_img = image.rotate(angle, resample=Image.BILINEAR, expand=False)
                 aug_img = transform.transforms[-1](aug_img) if hasattr(transform, "transforms") else transform(aug_img)
                 meta = {"type": "rotation", "angle": angle}
             else:
-                # for color_jitter, blur, grayscale: just apply transform and mark non-geometric
+                # color_jitter, blur, grayscale, center_crop, contrast_high: non-geometric
                 aug_img = transform(image)
                 meta = {"type": "none"}
 

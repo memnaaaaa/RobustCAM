@@ -96,8 +96,18 @@ class GradCAMService:
         """
         Return a normalized float32 heatmap in [0,1] (resized later to orig image shape).
         Activation & gradient are per-hook tensors.
+        Handles both CNN (4D: B,C,H,W) and ViT (3D: B,seq_len,C) tensors.
         """
         with torch.no_grad():
+            # ViT encoder blocks produce [B, seq_len, C]; reshape to spatial [B, C, H, W]
+            if activation.dim() == 3:
+                B, seq_len, C = activation.shape
+                # Drop CLS token (index 0), reshape patch tokens to square grid
+                patches = seq_len - 1
+                grid = int(patches ** 0.5)
+                activation = activation[:, 1:, :].reshape(B, grid, grid, C).permute(0, 3, 1, 2)
+                gradient = gradient[:, 1:, :].reshape(B, grid, grid, C).permute(0, 3, 1, 2)
+
             grad = gradient.mean(dim=(2, 3), keepdim=True)         # [1, C, 1, 1]
             cam = (grad * activation).sum(dim=1, keepdim=True)     # [1, 1, H, W]
             cam = torch.relu(cam)
@@ -109,6 +119,18 @@ class GradCAMService:
             cam_max = cam.max() + 1e-8
             cam = cam / cam_max
         return cam  # float32 in [0,1]
+
+    def overlay(self, orig_img, heatmap: np.ndarray, alpha: float = 0.4) -> np.ndarray:
+        """Public wrapper around _overlay. Accepts PIL Image or numpy RGB array."""
+        return self._overlay(orig_img, heatmap, alpha)
+
+    def resize_heatmap_to_image(self, heatmap: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+        """
+        Bilinear resize of a float32 [H, W] heatmap to (target_h, target_w), clipped to [0, 1].
+        """
+        resized = cv2.resize(heatmap.astype(np.float32), (target_w, target_h),
+                             interpolation=cv2.INTER_LINEAR)
+        return np.clip(resized, 0.0, 1.0)
 
     def generate_stagewise_raw(self, orig_img, activations, gradients):
         """

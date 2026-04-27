@@ -139,6 +139,9 @@ class ModelService:
             elif arch == "efficientnet_b0":
                 in_feat = self.model.classifier[1].in_features
                 self.model.classifier[1] = nn.Linear(in_feat, num_classes)
+            elif arch == "vit_b_16":
+                in_feat = self.model.heads.head.in_features
+                self.model.heads.head = nn.Linear(in_feat, num_classes)
             self.model.load_state_dict(ckpt['model_state_dict'])
             val_acc = ckpt.get('val_acc', float('nan'))
             epoch = ckpt.get('epoch', '?')
