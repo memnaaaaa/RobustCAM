@@ -277,17 +277,22 @@ def compute_all_metrics(
         print(f"[Warning] loc_acc failed: {e}")
         results["loc_acc"] = np.nan
 
-    # consist_iou: use aug_heatmaps → heatmap_fn runs → single heatmap (→ 1.0 trivially)
+    # consist_iou: requires multiple distinct views to be meaningful.
+    # Use aug_heatmaps for Robust-CAM; noisy heatmap_fn repeats for others.
+    # Return NaN when only a single view is available — IoU(x,x)=1.0 is trivial.
     try:
-        if aug_heatmaps is not None and len(aug_heatmaps) > 0:
+        if aug_heatmaps is not None and len(aug_heatmaps) > 1:
             consist_maps = aug_heatmaps
+            results["consist_iou"] = explanation_consistency(
+                consist_maps, heatmap, threshold_percentile
+            )
         elif heatmap_fn is not None:
             consist_maps = [heatmap_fn(input_tensor) for _ in range(n_consistency_runs)]
+            results["consist_iou"] = explanation_consistency(
+                consist_maps, heatmap, threshold_percentile
+            )
         else:
-            consist_maps = [heatmap]
-        results["consist_iou"] = explanation_consistency(
-            consist_maps, heatmap, threshold_percentile
-        )
+            results["consist_iou"] = np.nan
     except Exception as e:
         print(f"[Warning] consist_iou failed: {e}")
         results["consist_iou"] = np.nan
@@ -310,15 +315,16 @@ def compute_all_metrics(
         print(f"[Warning] stability failed: {e}")
         results["stability"] = np.nan
 
-    # consist_pearson: same source logic as consist_iou
+    # consist_pearson: same source logic as consist_iou — NaN with only one view.
     try:
-        if aug_heatmaps is not None and len(aug_heatmaps) > 0:
+        if aug_heatmaps is not None and len(aug_heatmaps) > 1:
             pearson_maps = aug_heatmaps
+            results["consist_pearson"] = xai_consistency_pearson(pearson_maps)
         elif heatmap_fn is not None:
             pearson_maps = [heatmap_fn(input_tensor) for _ in range(n_consistency_runs)]
+            results["consist_pearson"] = xai_consistency_pearson(pearson_maps)
         else:
-            pearson_maps = [heatmap]
-        results["consist_pearson"] = xai_consistency_pearson(pearson_maps)
+            results["consist_pearson"] = np.nan
     except Exception as e:
         print(f"[Warning] consist_pearson failed: {e}")
         results["consist_pearson"] = np.nan

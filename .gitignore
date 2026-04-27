@@ -1,5 +1,6 @@
 marimo/_lsp/
 __marimo__/
+.claude/
 
 # MLflow that stores experiment runs in the default directory
 mlruns/
@@ -17,11 +18,8 @@ test_mlflow_connection.py
 # Checkpoints (large binary files — commit only intentionally)
 checkpoints/*.pth
 
-# Results — keep structure via .gitkeep, ignore bulk generated images
-# Commit only curated final figures used in the report
-results/figures/qualitative/*.png
-results/figures/quantitative/*.png
-results/figures/training/*.png
+# Results — commit all generated figures and tables
+results/figures/qualitative/.gitkeep
 # Tables are small CSVs — commit them
 !results/tables/*.csv
 

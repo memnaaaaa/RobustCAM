@@ -385,26 +385,37 @@ def run_eval_pipeline(
                 fused_heatmap=hm_rc_median,
             )
 
-            metrics_by_method["LIME"] = compute_all_metrics(
-                ms, tensor, hm_lime, pred_class,
-                heatmap_fn=None,
-                aug_heatmaps=None,
-                fused_heatmap=None,
-            )
+            # Only compute metrics for LIME/SHAP/Voting when the methods actually ran;
+            # a zeros heatmap would zero the whole image at 80th-percentile threshold,
+            # corrupting faith/fidelity for every other method in the comparison table.
+            _nan_metrics = {k: float("nan") for k in [
+                "faith", "loc_acc", "consist_iou", "fidelity", "stability",
+                "consist_pearson", "mean_variance", "mean_iou_topk", "mean_spearman",
+            ]}
 
-            metrics_by_method["SHAP"] = compute_all_metrics(
-                ms, tensor, hm_shap, pred_class,
-                heatmap_fn=None,
-                aug_heatmaps=None,
-                fused_heatmap=None,
-            )
-
-            metrics_by_method["Voting mask"] = compute_all_metrics(
-                ms, tensor, hm_voting, pred_class,
-                heatmap_fn=None,
-                aug_heatmaps=None,
-                fused_heatmap=None,
+            if run_lime and lime_svc is not None and hm_lime.max() > 0:
+                metrics_by_method["LIME"] = compute_all_metrics(
+                    ms, tensor, hm_lime, pred_class,
+                    heatmap_fn=None, aug_heatmaps=None, fused_heatmap=None,
                 )
+            else:
+                metrics_by_method["LIME"] = dict(_nan_metrics)
+
+            if run_shap and shap_svc is not None and hm_shap.max() > 0:
+                metrics_by_method["SHAP"] = compute_all_metrics(
+                    ms, tensor, hm_shap, pred_class,
+                    heatmap_fn=None, aug_heatmaps=None, fused_heatmap=None,
+                )
+            else:
+                metrics_by_method["SHAP"] = dict(_nan_metrics)
+
+            if run_lime and run_shap and hm_lime.max() > 0 and hm_shap.max() > 0:
+                metrics_by_method["Voting mask"] = compute_all_metrics(
+                    ms, tensor, hm_voting, pred_class,
+                    heatmap_fn=None, aug_heatmaps=None, fused_heatmap=None,
+                )
+            else:
+                metrics_by_method["Voting mask"] = dict(_nan_metrics)
 
             # ── accumulate & log per-image metrics ────────────────────────────
             for method, mdict in metrics_by_method.items():
